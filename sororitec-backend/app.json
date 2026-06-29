@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "2b9783f4-a10d-47a6-9ea4-895d7b19c2b9"
+      }
+    },
+    "android": {
+      "package": "com.luzv.sororitecbackend"
+    }
+  }
+}
