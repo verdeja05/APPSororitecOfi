@@ -1,29 +1,31 @@
-const router = require('express').Router();
-const Publicacion = require('../models/Publicacion');
-const Comentario = require('../models/Comentario');
-const Usuaria = require('../models/Usuaria');
-const authMiddleware = require('../middleware/auth.middleware');
+const router = require("express").Router();
+const Publicacion = require("../models/Publicacion");
+const Comentario = require("../models/Comentario");
+const Usuaria = require("../models/Usuario");
+const authMiddleware = require("../middleware/auth.middleware");
 
-router.get('/', async (req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const publicaciones = await Publicacion.find({ estado: 'activa' })
+    const publicaciones = await Publicacion.find({ estado: "activa" })
       .sort({ fecha_publicacion: -1 })
       .limit(20)
-      .populate('id_usuaria', 'foto_perfil nombre_completo');
-    
-    const resultado = publicaciones.map(post => ({
+      .populate("id_usuaria", "foto_perfil nombre_completo");
+
+    const resultado = publicaciones.map((post) => ({
       ...post.toObject(),
       foto_autor: post.es_anonima ? null : post.id_usuaria?.foto_perfil || null,
-      nombre_autor: post.es_anonima ? null : post.nombre_autor || post.id_usuaria?.nombre_completo
+      nombre_autor: post.es_anonima
+        ? null
+        : post.nombre_autor || post.id_usuaria?.nombre_completo,
     }));
 
     res.json(resultado);
   } catch (err) {
-    res.status(500).json({ mensaje: 'Error al obtener publicaciones' });
+    res.status(500).json({ mensaje: "Error al obtener publicaciones" });
   }
 });
 
-router.post('/', authMiddleware, async (req, res) => {
+router.post("/", authMiddleware, async (req, res) => {
   try {
     const { contenido, categoria, es_anonima, imagen_url } = req.body;
     const usuaria = await Usuaria.findById(req.usuaria.id);
@@ -34,22 +36,24 @@ router.post('/', authMiddleware, async (req, res) => {
       es_anonima: es_anonima || false,
       categoria,
       contenido,
-      estado: 'activa',
-      imagen_url: imagen_url || null
+      estado: "activa",
+      imagen_url: imagen_url || null,
     });
 
     await publicacion.save();
-    res.status(201).json({ mensaje: 'Publicación creada', publicacion });
+    res.status(201).json({ mensaje: "Publicación creada", publicacion });
   } catch (err) {
-    res.status(500).json({ mensaje: 'Error al crear publicación', error: err.message });
+    res
+      .status(500)
+      .json({ mensaje: "Error al crear publicación", error: err.message });
   }
 });
 
 // Dar/quitar like
-router.put('/:id/like', authMiddleware, async (req, res) => {
+router.put("/:id/like", authMiddleware, async (req, res) => {
   try {
     const publicacion = await Publicacion.findById(req.params.id);
-    if (!publicacion) return res.status(404).json({ mensaje: 'No encontrada' });
+    if (!publicacion) return res.status(404).json({ mensaje: "No encontrada" });
 
     const yaLiked = publicacion.likes_usuarias.includes(req.usuaria.id);
     if (yaLiked) {
@@ -62,24 +66,24 @@ router.put('/:id/like', authMiddleware, async (req, res) => {
     await publicacion.save();
     res.json({ likes: publicacion.likes, liked: !yaLiked });
   } catch (err) {
-    res.status(500).json({ mensaje: 'Error', error: err.message });
+    res.status(500).json({ mensaje: "Error", error: err.message });
   }
 });
 
 // Ver comentarios
-router.get('/:id/comentarios', authMiddleware, async (req, res) => {
+router.get("/:id/comentarios", authMiddleware, async (req, res) => {
   try {
     const comentarios = await Comentario.find({ id_publicacion: req.params.id })
-      .populate('id_usuaria', 'nombre_completo foto_perfil')
+      .populate("id_usuaria", "nombre_completo foto_perfil")
       .sort({ fecha: 1 });
     res.json(comentarios);
   } catch (err) {
-    res.status(500).json({ mensaje: 'Error', error: err.message });
+    res.status(500).json({ mensaje: "Error", error: err.message });
   }
 });
 
 // Agregar comentario
-router.post('/:id/comentarios', authMiddleware, async (req, res) => {
+router.post("/:id/comentarios", authMiddleware, async (req, res) => {
   try {
     const { contenido, es_anonimo } = req.body;
     const usuaria = await Usuaria.findById(req.usuaria.id);
@@ -87,18 +91,20 @@ router.post('/:id/comentarios', authMiddleware, async (req, res) => {
     const comentario = new Comentario({
       id_publicacion: req.params.id,
       id_usuaria: req.usuaria.id,
-      nombre_autor: es_anonimo ? 'Anónima' : usuaria.nombre_completo,
+      nombre_autor: es_anonimo ? "Anónima" : usuaria.nombre_completo,
       foto_autor: es_anonimo ? null : usuaria.foto_perfil,
       es_anonimo: es_anonimo || false,
-      contenido
+      contenido,
     });
     await comentario.save();
 
-    await Publicacion.findByIdAndUpdate(req.params.id, { $inc: { num_comentarios: 1 } });
+    await Publicacion.findByIdAndUpdate(req.params.id, {
+      $inc: { num_comentarios: 1 },
+    });
 
-    res.status(201).json({ mensaje: 'Comentario agregado', comentario });
+    res.status(201).json({ mensaje: "Comentario agregado", comentario });
   } catch (err) {
-    res.status(500).json({ mensaje: 'Error', error: err.message });
+    res.status(500).json({ mensaje: "Error", error: err.message });
   }
 });
 

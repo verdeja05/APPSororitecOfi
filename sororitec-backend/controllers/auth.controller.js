@@ -1,69 +1,148 @@
+const Usuario = require('../models/Usuario');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const Usuaria = require('../models/Usuaria');
 
+// ==========================================
+// REGISTRO - CON USUARIO ACTIVO
+// ==========================================
 exports.registro = async (req, res) => {
   try {
     const { nombre_completo, correo_institucional, contrasena, carrera, cuatrimestre } = req.body;
 
-    const existe = await Usuaria.findOne({ correo_institucional });
-    if (existe) return res.status(400).json({ mensaje: 'Correo ya registrado' });
+    // Validar campos requeridos
+    if (!nombre_completo || !correo_institucional || !contrasena) {
+      return res.status(400).json({ 
+        mensaje: 'Faltan campos requeridos' 
+      });
+    }
 
+    // Verificar si el usuario ya existe
+    const existe = await Usuario.findOne({ correo_institucional });
+    if (existe) {
+      return res.status(400).json({ mensaje: 'El correo ya está registrado' });
+    }
+
+    // Hashear contraseña
     const salt = await bcrypt.genSalt(10);
-    const contrasena_hash = await bcrypt.hash(contrasena, salt);
+    const hashedPassword = await bcrypt.hash(contrasena, salt);
 
-    const usuaria = new Usuaria({
+    // Crear usuario - VERIFICADO Y ACTIVO
+    const nuevaUsuaria = new Usuario({
       nombre_completo,
       correo_institucional,
-      contrasena_hash,
-      carrera,
-      cuatrimestre
+      contrasena: hashedPassword,
+      carrera: carrera || '',
+      cuatrimestre: cuatrimestre || 1,
+      verificado: true,
+      estado: 'activo',
+      fecha_registro: new Date(),
+      fecha_validacion: new Date()
     });
 
-    await usuaria.save();
-    res.status(201).json({ mensaje: 'Registro exitoso, pendiente de validación' });
-  } catch (err) {
-    console.log('ERROR REGISTRO:', err);
-    res.status(500).json({ mensaje: 'Error en el servidor', error: err.message });
+    await nuevaUsuaria.save();
+
+    // Generar token JWT
+    const token = jwt.sign(
+      { 
+        id: nuevaUsuaria._id, 
+        correo: nuevaUsuaria.correo_institucional 
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRE || '7d' }
+    );
+
+    res.status(201).json({
+      mensaje: 'Registro exitoso',
+      token,
+      usuaria: {
+        id: nuevaUsuaria._id,
+        nombre: nuevaUsuaria.nombre_completo,
+        correo: nuevaUsuaria.correo_institucional,
+        carrera: nuevaUsuaria.carrera,
+        cuatrimestre: nuevaUsuaria.cuatrimestre
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error en registro:', error);
+    res.status(500).json({ 
+      mensaje: 'Error en el servidor', 
+      error: error.message 
+    });
   }
 };
 
+// ==========================================
+// LOGIN
+// ==========================================
 exports.login = async (req, res) => {
   try {
     const { correo_institucional, contrasena } = req.body;
 
-    const usuaria = await Usuaria.findOne({ correo_institucional });
-    if (!usuaria) return res.status(400).json({ mensaje: 'Credenciales incorrectas' });
+    if (!correo_institucional || !contrasena) {
+      return res.status(400).json({ 
+        mensaje: 'Correo y contraseña son requeridos' 
+      });
+    }
 
-    if (usuaria.estado_cuenta === 'pendiente')
-      return res.status(403).json({ mensaje: 'Tu cuenta está pendiente de validación' });
+    const usuaria = await Usuario.findOne({ correo_institucional });
+    if (!usuaria) {
+      return res.status(400).json({ mensaje: 'Credenciales incorrectas' });
+    }
 
-    if (usuaria.estado_cuenta !== 'activa')
-      return res.status(403).json({ mensaje: 'Tu cuenta no está activa' });
+    // Verificar que esté activo
+    if (usuaria.estado !== 'activo' || !usuaria.verificado) {
+      return res.status(400).json({ 
+        mensaje: 'Tu cuenta aún no ha sido validada' 
+      });
+    }
 
-    const valida = await bcrypt.compare(contrasena, usuaria.contrasena_hash);
-    if (!valida) return res.status(400).json({ mensaje: 'Credenciales incorrectas' });
-
-    usuaria.ultimo_acceso = new Date();
-    await usuaria.save();
+    const esValida = await bcrypt.compare(contrasena, usuaria.contrasena);
+    if (!esValida) {
+      return res.status(400).json({ mensaje: 'Credenciales incorrectas' });
+    }
 
     const token = jwt.sign(
-      { id: usuaria._id, estado: usuaria.estado_cuenta },
+      { id: usuaria._id, correo: usuaria.correo_institucional },
       process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRE }
+      { expiresIn: process.env.JWT_EXPIRE || '7d' }
     );
 
-    res.json({ token, usuaria: { nombre_completo: usuaria.nombre_completo, carrera: usuaria.carrera } });
-  } catch (err) {
-    res.status(500).json({ mensaje: 'Error en el servidor', error: err.message });
+    res.json({
+      token,
+      usuaria: {
+        id: usuaria._id,
+        nombre: usuaria.nombre_completo,
+        correo: usuaria.correo_institucional,
+        carrera: usuaria.carrera,
+        cuatrimestre: usuaria.cuatrimestre
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error en login:', error);
+    res.status(500).json({ 
+      mensaje: 'Error en el servidor', 
+      error: error.message 
+    });
   }
 };
 
+// ==========================================
+// PERFIL
+// ==========================================
 exports.perfil = async (req, res) => {
   try {
-    const usuaria = await Usuaria.findById(req.usuaria.id).select('-contrasena_hash');
+    const usuaria = await Usuario.findById(req.usuario.id).select('-contrasena');
+    if (!usuaria) {
+      return res.status(404).json({ mensaje: 'Usuario no encontrado' });
+    }
     res.json(usuaria);
-  } catch (err) {
-    res.status(500).json({ mensaje: 'Error en el servidor' });
+  } catch (error) {
+    console.error('❌ Error en perfil:', error);
+    res.status(500).json({ 
+      mensaje: 'Error en el servidor', 
+      error: error.message 
+    });
   }
 };
