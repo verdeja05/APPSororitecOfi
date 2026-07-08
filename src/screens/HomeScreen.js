@@ -230,13 +230,13 @@ export default function HomeScreen({ navigation }) {
             </TouchableOpacity>
 
             {[
-              { nombre: 'Inicio', icono: '🏠', ruta: 'Home' },
-              { nombre: 'GPS Sorori', icono: '📍', ruta: 'GPS', badge: 'Nuevo' },
-              { nombre: 'Foro', icono: '💬', ruta: 'Foro' },
-              { nombre: 'Dudas médicas', icono: '🩺', ruta: 'DudasMedicas' },
-              { nombre: 'Dudas legales', icono: '⚖️', ruta: 'DudasLegales' },
-              { nombre: 'Talleres', icono: '📖', ruta: 'Talleres' },
-              { nombre: 'Becas', icono: '🎓', ruta: 'Becas' },
+              { nombre: 'Inicio', icono: '', ruta: 'Home' },
+              { nombre: 'GPS Sorori', icono: '', ruta: 'GPS', badge: 'Nuevo' },
+              { nombre: 'Foro', icono: '', ruta: 'Foro' },
+              { nombre: 'Dudas médicas', icono: '', ruta: 'DudasMedicas' },
+              { nombre: 'Dudas legales', icono: '', ruta: 'DudasLegales' },
+              { nombre: 'Talleres', icono: '', ruta: 'Talleres' },
+              { nombre: 'Becas', icono: '', ruta: 'Becas' },
             ].map((item, i) => (
               <TouchableOpacity
                 key={i}
@@ -256,7 +256,7 @@ export default function HomeScreen({ navigation }) {
             ))}
 
             <View style={styles.drawerFooter}>
-              <Text style={styles.footerTexto}>🛡️ Espacio seguro certificado</Text>
+              <Text style={styles.footerTexto}> Espacio seguro certificado</Text>
               <TouchableOpacity onPress={logout}>
                 <Text style={styles.cerrarSesion}>Cerrar sesión</Text>
               </TouchableOpacity>
@@ -305,7 +305,7 @@ export default function HomeScreen({ navigation }) {
                 {fotoPerfil ? (
                   <Image source={{ uri: fotoPerfil }} style={{ width: 56, height: 56, borderRadius: 28 }} />
                 ) : (
-                  <Text style={{ fontSize: 24 }}>👤</Text>
+                  <Text style={{ fontSize: 24 }}></Text>
                 )}
                 <View style={styles.historiaMasBadge}>
                   <Text style={styles.historiaMasTexto}>+</Text>
@@ -329,7 +329,7 @@ export default function HomeScreen({ navigation }) {
                   {u.foto_perfil ? (
                     <Image source={{ uri: u.foto_perfil }} style={{ width: 56, height: 56, borderRadius: 28 }} />
                   ) : (
-                    <Text style={{ fontSize: 24 }}>👤</Text>
+                    <Text style={{ fontSize: 24 }}></Text>
                   )}
                 </View>
                 <Text style={styles.historiaNombre}>

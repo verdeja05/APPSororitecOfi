@@ -13,6 +13,7 @@ app.use('/api/auth', require('./routes/auth.routes'));
 app.use('/api/publicaciones', require('./routes/publicaciones.routes'));
 app.use('/api/acompanamientos', require('./routes/acompanamientos.routes'));app.use('/api/perfil', require('./routes/perfil.routes'));
 app.use('/api/historias', require('./routes/historias.routes'));
+app.use('/api/mensajes', require('./routes/mensajes.routes'));
 
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('✅ MongoDB conectado'))

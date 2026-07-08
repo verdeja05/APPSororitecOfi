@@ -16,6 +16,7 @@ import { useAuth } from '../src/context/AuthContext';
 import { createStackNavigator } from '@react-navigation/stack';
 import CrearHistoriaScreen from '../src/screens/CrearHistoriaScreen';
 import VerHistoriaScreen from '../src/screens/VerHistoriaScreen';
+import ChatAcompanamientoScreen from '../src/screens/ChatAcompanamientoScreen';
 
 const Stack = createStackNavigator();
 
@@ -42,6 +43,7 @@ function Navigation() {
           <Stack.Screen name="Perfil" component={PerfilScreen} />
           <Stack.Screen name="CrearHistoria" component={CrearHistoriaScreen} />
           <Stack.Screen name="VerHistoria" component={VerHistoriaScreen} />
+          <Stack.Screen name="ChatAcompanamiento" component={ChatAcompanamientoScreen} />
         </>
       )}
     </Stack.Navigator>
