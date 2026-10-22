@@ -53,7 +53,19 @@ exports.login = async (req, res) => {
       { expiresIn: process.env.JWT_EXPIRE }
     );
 
-    res.json({ token, usuaria: { nombre_completo: usuaria.nombre_completo, carrera: usuaria.carrera } });
+    res.json({
+      token,
+      usuaria: {
+        _id: usuaria._id,
+        nombre_completo: usuaria.nombre_completo,
+        correo_institucional: usuaria.correo_institucional,
+        carrera: usuaria.carrera,
+        cuatrimestre: usuaria.cuatrimestre,
+        foto_perfil: usuaria.foto_perfil,
+        rol: usuaria.rol,
+        estado_cuenta: usuaria.estado_cuenta,
+      }
+    });
   } catch (err) {
     res.status(500).json({ mensaje: 'Error en el servidor', error: err.message });
   }

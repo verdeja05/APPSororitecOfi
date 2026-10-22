@@ -11,6 +11,8 @@ const acompanamientoSchema = new mongoose.Schema({
   ubicacion_usuaria: { latitud: Number, longitud: Number },
   ubicacion_acompanante: { latitud: Number, longitud: Number },
   descripcion: { type: String, default: '' },
+  situacion_tipo: { type: String, default: '' },
+  destino: { type: String, default: '' },
   fecha_solicitud: { type: Date, default: Date.now },
   fecha_aceptacion: { type: Date, default: null },
   fecha_inicio: { type: Date, default: null },
@@ -21,7 +23,11 @@ const acompanamientoSchema = new mongoose.Schema({
   confirmacion_acompanante: { type: Boolean, default: false },
   llegada_usuaria: { type: Boolean, default: false },
   llegada_acompanante: { type: Boolean, default: false },
-  destino: { nombre: String, lat: Number, lon: Number },
+  calificacion_a_acompanante: { type: Number, default: null, min: 1, max: 5 },
+  calificacion_a_usuaria: { type: Number, default: null, min: 1, max: 5 },
+  resena_a_acompanante: { type: String, default: '' },
+  resena_a_usuaria: { type: String, default: '' },
+  reporte_enviado: { type: Boolean, default: false },
 });
 
 module.exports = mongoose.model('Acompanamiento', acompanamientoSchema, 'acompanamientos');

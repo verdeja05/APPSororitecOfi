@@ -3,6 +3,8 @@ const Mensaje = require('../models/Mensaje');
 const Acompanamiento = require('../models/Acompanamiento');
 const Usuaria = require('../models/Usuaria');
 const authMiddleware = require('../middleware/auth.middleware');
+const router = require('express').Router();
+module.exports = router;
 
 // Obtener mensajes de un acompañamiento
 router.get('/:id_acompanamiento', authMiddleware, async (req, res) => {

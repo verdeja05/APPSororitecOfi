@@ -2,34 +2,77 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   ActivityIndicator, Alert, ScrollView,
-  TextInput, Linking, RefreshControl, Image
+  TextInput, RefreshControl, Dimensions,
+  Image, Modal, Linking
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import MapView, { Marker, UrlTile } from 'react-native-maps';
+import MapView, { Marker, UrlTile, Circle } from 'react-native-maps';
 import * as Location from 'expo-location';
+import {
+  MapPin, Users, Shield, Navigation, ChevronLeft,
+  CheckCircle, Clock, Share2, AlertTriangle,
+  UserCheck, Flag, RefreshCw, Star, X,
+  Home, Moon, AlertCircle, Heart, Phone
+} from 'lucide-react-native';
 import api from '../services/api';
+
+const { width, height } = Dimensions.get('window');
+
+const COLORES = {
+  primario: '#7C3AED', secundario: '#A78BFA', acento: '#C4B5FD',
+  fondo: '#0D0B1A', superficie: '#16122A', superficie2: '#1E1A35',
+  superficie3: '#2D1B69', borde: '#2E2850', texto: '#F3F1FF',
+  textoSub: '#9B94C4', textoMuted: '#6B6490',
+  exito: '#10B981', alerta: '#F59E0B', error: '#EF4444', rosa: '#EC4899',
+};
+
+const SITUACIONES = [
+  { key: 'noche', label: 'Voy sola de noche', Icon: Moon },
+  { key: 'insegura', label: 'Me siento insegura', Icon: AlertCircle },
+  { key: 'casa', label: 'Necesito llegar a casa', Icon: Home },
+  { key: 'acoso', label: 'Situacion de acoso', Icon: AlertTriangle },
+  { key: 'salud', label: 'Necesito apoyo emocional', Icon: Heart },
+  { key: 'otro', label: 'Otra situacion', Icon: Shield },
+];
+
+const TABS = [
+  { key: 'solicitar', label: 'Pedir ayuda', Icon: Shield },
+  { key: 'ayudar', label: 'Ayudar', Icon: Users },
+  { key: 'mis', label: 'Historial', Icon: Clock },
+];
 
 export default function GPSScreen({ navigation }) {
   const [ubicacion, setUbicacion] = useState(null);
   const [cargando, setCargando] = useState(true);
   const [solicitudes, setSolicitudes] = useState([]);
+  const [disponibles, setDisponibles] = useState([]);
   const [misSolicitudes, setMisSolicitudes] = useState([]);
   const [misAceptaciones, setMisAceptaciones] = useState([]);
-  const [descripcion, setDescripcion] = useState('');
-  const [enviando, setEnviando] = useState(false);
   const [tab, setTab] = useState('solicitar');
   const [acompanamientoActivo, setAcompanamientoActivo] = useState(null);
   const [detalleActivo, setDetalleActivo] = useState(null);
   const [esAcompanante, setEsAcompanante] = useState(false);
   const [refrescando, setRefrescando] = useState(false);
+  const [enviando, setEnviando] = useState(false);
+  const [panico, setPanico] = useState(false);
+
+  // Formulario
+  const [situacionTipo, setSituacionTipo] = useState('');
+  const [descripcion, setDescripcion] = useState('');
+  const [destino, setDestino] = useState('');
+
+  // Modal calificacion
+  const [modalCalificar, setModalCalificar] = useState(false);
+  const [acompanamientoCalificar, setAcompanamientoCalificar] = useState(null);
+  const [calificacion, setCalificacion] = useState(0);
+  const [resena, setResena] = useState('');
+  const [enviandoCalif, setEnviandoCalif] = useState(false);
+
   const mapRef = useRef(null);
   const intervaloRef = useRef(null);
 
   useEffect(() => {
     iniciar();
-    intervaloRef.current = setInterval(() => {
-      cargarDatos();
-    }, 8000);
+    intervaloRef.current = setInterval(cargarDatos, 8000);
     return () => clearInterval(intervaloRef.current);
   }, []);
 
@@ -42,18 +85,17 @@ export default function GPSScreen({ navigation }) {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permiso denegado', 'Necesitamos acceso a tu ubicación');
+        Alert.alert('Permiso denegado', 'Necesitamos acceso a tu ubicacion');
         setCargando(false);
         return;
       }
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low });
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       setUbicacion(loc.coords);
       await api.post('/acompanamientos/registrar-disponible', {
-        latitud: loc.coords.latitude,
-        longitud: loc.coords.longitude
+        latitud: loc.coords.latitude, longitud: loc.coords.longitude
       });
     } catch (err) {
-      console.log('Error ubicación:', err);
+      console.log('Error ubicacion:', err);
     } finally {
       setCargando(false);
     }
@@ -61,20 +103,18 @@ export default function GPSScreen({ navigation }) {
 
   const cargarDatos = async () => {
     try {
-      const [pendientes, mias, aceptaciones] = await Promise.all([
+      const [pendientes, mias, aceptaciones, disp] = await Promise.all([
         api.get('/acompanamientos/pendientes'),
         api.get('/acompanamientos/mis-solicitudes'),
         api.get('/acompanamientos/mis-aceptaciones'),
+        api.get('/acompanamientos/disponibles'),
       ]);
-
       setSolicitudes(pendientes.data);
       setMisSolicitudes(mias.data);
       setMisAceptaciones(aceptaciones.data);
+      setDisponibles(disp.data);
 
-      // Buscar activo como usuaria
       const activoUsuaria = mias.data.find(s => ['aceptado', 'en_curso'].includes(s.estado));
-
-      // Buscar activo como acompañante
       const activoAcompanante = aceptaciones.data.find(s => ['aceptado', 'en_curso'].includes(s.estado));
 
       if (activoUsuaria) {
@@ -93,7 +133,7 @@ export default function GPSScreen({ navigation }) {
         setEsAcompanante(false);
       }
     } catch (err) {
-      console.log('Error cargando datos:', err);
+      console.log('Error datos:', err);
     }
   };
 
@@ -105,7 +145,7 @@ export default function GPSScreen({ navigation }) {
   };
 
   const calcularDistancia = (lat1, lon1, lat2, lon2) => {
-    if (!lat1 || !lon1 || !lat2 || !lon2) return '?';
+    if (!lat1 || !lon1 || !lat2 || !lon2) return null;
     const R = 6371;
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
@@ -113,59 +153,79 @@ export default function GPSScreen({ navigation }) {
       Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
       Math.sin(dLon / 2) ** 2;
     const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return dist < 1 ? `${(dist * 1000).toFixed(0)} m` : `${dist.toFixed(1)} km`;
+    return dist < 1 ? `${(dist * 1000).toFixed(0)}m` : `${dist.toFixed(1)}km`;
+  };
+
+  const activarPanico = async () => {
+    setPanico(true);
+    try {
+      await api.post('/acompanamientos/solicitar', {
+        latitud: ubicacion?.latitude,
+        longitud: ubicacion?.longitude,
+        descripcion: 'ALERTA DE PANICO - Necesito ayuda urgente',
+        situacion_tipo: 'panico',
+        destino: ''
+      });
+      Alert.alert(
+        'Alerta enviada',
+        'Tu solicitud de ayuda urgente fue enviada. Las acompanantes cercanas fueron notificadas.',
+        [{ text: 'OK', onPress: () => setPanico(false) }]
+      );
+      cargarDatos();
+      setTab('mis');
+    } catch (err) {
+      Alert.alert('Error', 'No se pudo enviar la alerta');
+      setPanico(false);
+    }
   };
 
   const solicitarAcompanamiento = async () => {
     if (!ubicacion) {
-      Alert.alert('Sin ubicación', 'Activa el GPS e intenta de nuevo');
+      Alert.alert('Sin ubicacion', 'Activa el GPS e intenta de nuevo');
       return;
     }
-    Alert.alert(
-      ' Solicitar acompañamiento',
-      '¿Quieres enviar una solicitud a las acompañantes cercanas?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Sí, pedir ayuda',
-          onPress: async () => {
-            setEnviando(true);
-            try {
-              await api.post('/acompanamientos/solicitar', {
-                latitud: ubicacion.latitude,
-                longitud: ubicacion.longitude,
-                descripcion
-              });
-              Alert.alert(' ¡Solicitud enviada!', 'Las acompañantes cercanas pueden ver tu petición');
-              setDescripcion('');
-              cargarDatos();
-            } catch (err) {
-              Alert.alert('Error', err.response?.data?.mensaje || 'No se pudo enviar');
-            } finally {
-              setEnviando(false);
-            }
-          }
-        }
-      ]
-    );
+    if (!situacionTipo) {
+      Alert.alert('Selecciona tu situacion', 'Por favor elige una opcion para que la acompanante sepa como ayudarte');
+      return;
+    }
+    setEnviando(true);
+    try {
+      await api.post('/acompanamientos/solicitar', {
+        latitud: ubicacion.latitude,
+        longitud: ubicacion.longitude,
+        descripcion,
+        situacion_tipo: situacionTipo,
+        destino,
+      });
+      Alert.alert('Solicitud enviada', 'Las acompanantes cercanas pueden ver tu peticion.');
+      setDescripcion('');
+      setDestino('');
+      setSituacionTipo('');
+      cargarDatos();
+      setTab('mis');
+    } catch (err) {
+      Alert.alert('Error', err.response?.data?.mensaje || 'No se pudo enviar');
+    } finally {
+      setEnviando(false);
+    }
   };
 
   const aceptarSolicitud = async (sol) => {
     if (!ubicacion) return;
+    const situacion = SITUACIONES.find(s => s.key === sol.situacion_tipo);
     Alert.alert(
-      ' Ayudar a ' + (sol.id_usuaria?.nombre_completo?.split(' ')[0] || 'esta sorori'),
-      `📝 ${sol.descripcion || 'Solicita acompañamiento'}\n\n¿Confirmas que vas a ayudarla?`,
+      `Ayudar a ${sol.id_usuaria?.nombre_completo?.split(' ')[0] || 'esta sorori'}`,
+      `${situacion ? situacion.label : ''}\n${sol.descripcion || ''}\n${sol.destino ? `Destino: ${sol.destino}` : ''}`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
-          text: ' Sí, voy a ayudar',
+          text: 'Ir a ayudar',
           onPress: async () => {
             try {
               await api.put(`/acompanamientos/aceptar/${sol._id}`, {
-                latitud: ubicacion.latitude,
-                longitud: ubicacion.longitude
+                latitud: ubicacion.latitude, longitud: ubicacion.longitude
               });
-              Alert.alert(' ¡Aceptado!', 'Dirígete hacia ella. Cuando se encuentren, ambas confirman.');
+              Alert.alert('Aceptado', 'Dirigete hacia ella.');
               cargarDatos();
               setTab('mis');
             } catch (err) {
@@ -184,9 +244,9 @@ export default function GPSScreen({ navigation }) {
         : `/acompanamientos/confirmar-usuaria/${id}`;
       const res = await api.put(ruta);
       if (res.data.acompanamiento.estado === 'en_curso') {
-        Alert.alert(' ¡Ya están juntas!', '¡El recorrido ha comenzado! ¡Cuídense mucho!');
+        Alert.alert('Ya estan juntas', 'El recorrido ha comenzado.');
       } else {
-        Alert.alert(' Confirmado', 'Esperando que la otra también confirme...');
+        Alert.alert('Confirmado', 'Esperando que la otra tambien confirme...');
       }
       cargarDatos();
     } catch (err) {
@@ -201,155 +261,152 @@ export default function GPSScreen({ navigation }) {
         : `/acompanamientos/llegada-usuaria/${id}`;
       const res = await api.put(ruta);
       if (res.data.acompanamiento.estado === 'completado') {
-        Alert.alert(' ¡Llegaron!', '¡Recorrido completado! ¡Gracias por usar Sororitec! ');
+        // Abrir modal de calificacion
+        const ac = res.data.acompanamiento;
+        setAcompanamientoCalificar(ac);
+        setModalCalificar(true);
+        cargarDatos();
       } else {
-        Alert.alert(' Confirmado', 'Esperando que la otra confirme la llegada...');
+        Alert.alert('Confirmado', 'Esperando confirmacion de la otra...');
+        cargarDatos();
       }
-      cargarDatos();
     } catch (err) {
       Alert.alert('Error', 'No se pudo confirmar llegada');
     }
   };
 
-  const compartirRecorrido = async () => {
+  const enviarCalificacion = async () => {
+    if (calificacion === 0) {
+      Alert.alert('Califica el recorrido', 'Por favor selecciona una calificacion');
+      return;
+    }
+    setEnviandoCalif(true);
     try {
-      const lat = ubicacion?.latitude;
-      const lon = ubicacion?.longitude;
-      const url = `https://maps.google.com/?q=${lat},${lon}`;
-      await Linking.openURL(`whatsapp://send?text=Estoy en un recorrido seguro con Sororitec 💜 Mi ubicación en tiempo real: ${url}`);
+      await api.put(`/acompanamientos/calificar/${acompanamientoCalificar._id}`, {
+        calificacion,
+        resena,
+        rol: esAcompanante ? 'acompanante' : 'usuaria'
+      });
+      Alert.alert('Gracias', 'Tu calificacion fue enviada.');
+      setModalCalificar(false);
+      setCalificacion(0);
+      setResena('');
+      cargarDatos();
+    } catch (err) {
+      Alert.alert('Error', 'No se pudo enviar la calificacion');
+    } finally {
+      setEnviandoCalif(false);
+    }
+  };
+
+  const compartirRecorrido = async () => {
+    if (!ubicacion) return;
+    const url = `https://maps.google.com/?q=${ubicacion.latitude},${ubicacion.longitude}`;
+    try {
+      await Linking.openURL(`whatsapp://send?text=Estoy en un recorrido seguro con Sororitec. Mi ubicacion: ${url}`);
     } catch {
       Alert.alert('Sin WhatsApp', 'No se pudo abrir WhatsApp');
     }
   };
 
   const estadoColor = (estado) => ({
-    pendiente: '#FFA500',
-    aceptado: '#2196F3',
-    en_curso: '#7C3AED',
-    completado: '#4CAF50',
-    cancelado: '#f44336'
-  })[estado] || '#666';
+    pendiente: COLORES.alerta, aceptado: '#3B82F6',
+    en_curso: COLORES.primario, completado: COLORES.exito, cancelado: COLORES.error,
+  })[estado] || COLORES.textoSub;
 
   const estadoTexto = (estado) => ({
-    pendiente: ' Buscando acompañante',
-    aceptado: ' Yendo al encuentro',
-    en_curso: ' En recorrido',
-    completado: ' Completado',
-    cancelado: ' Cancelado'
+    pendiente: 'Buscando acompanante', aceptado: 'Yendo al encuentro',
+    en_curso: 'En recorrido', completado: 'Completado', cancelado: 'Cancelado',
   })[estado] || estado;
 
-  // Marcador con foto de perfil
-  const MarkerFoto = ({ foto, emoji, color }) => (
-    <View style={[styles.markerFoto, { borderColor: color }]}>
-      {foto ? (
-        <Image source={{ uri: foto }} style={styles.markerImagen} />
-      ) : (
-        <Text style={{ fontSize: 18 }}>{emoji}</Text>
-      )}
-    </View>
-  );
-
-  const renderPanelActivo = () => {
-    if (!acompanamientoActivo) return null;
-    const sol = detalleActivo || acompanamientoActivo;
-    const ubOtra = esAcompanante
-      ? (sol.id_usuaria?.ubicacion_actual || sol.ubicacion_usuaria)
-      : (sol.id_acompanante?.ubicacion_actual || sol.ubicacion_acompanante);
-    const nombreOtra = esAcompanante
-      ? (sol.nombre_usuaria || sol.id_usuaria?.nombre_completo)
-      : (sol.nombre_acompanante || sol.id_acompanante?.nombre_completo);
-    const yaConfirme = esAcompanante ? sol.confirmacion_acompanante : sol.confirmacion_usuaria;
-    const yaLlegue = esAcompanante ? sol.llegada_acompanante : sol.llegada_usuaria;
-    const tipoConfirmacion = esAcompanante ? 'acompanante' : 'usuaria';
-
-    return (
-      <View style={styles.panelActivo}>
-        <View style={styles.panelHeader}>
-          <Text style={styles.panelTitulo}>
-            {sol.estado === 'aceptado' ? ' Yendo al encuentro' : ' Recorrido en curso'}
-          </Text>
-          <View style={[styles.estadoBadge, { backgroundColor: estadoColor(sol.estado) }]}>
-            <Text style={styles.estadoBadgeTexto}>{estadoTexto(sol.estado)}</Text>
-          </View>
-        </View>
-
-        <Text style={styles.panelInfo}>
-          {esAcompanante ? ' Ayudando a: ' : ' Acompañante: '}{nombreOtra}
-        </Text>
-
-        {ubOtra?.latitud && ubicacion && (
-          <Text style={styles.panelDistancia}>
-             Distancia entre ustedes: {calcularDistancia(
-              ubicacion.latitude, ubicacion.longitude,
-              ubOtra.latitud, ubOtra.longitud
-            )}
-          </Text>
-        )}
-
-        {sol.estado === 'aceptado' && (
-          <View style={styles.panelBotones}>
-            <Text style={styles.panelSubtitulo}>
-              Cuando se encuentren, ambas deben confirmar 
-            </Text>
-            {!yaConfirme ? (
-              <TouchableOpacity
-                style={styles.botonConfirmar}
-                onPress={() => confirmarEncuentro(sol._id, tipoConfirmacion)}>
-                <Text style={styles.botonTexto}> Ya estamos juntas</Text>
-              </TouchableOpacity>
-            ) : (
-              <Text style={styles.esperando}> Esperando confirmación de la otra...</Text>
-            )}
-          </View>
-        )}
-
-        {sol.estado === 'en_curso' && (
-          <View style={styles.panelBotones}>
-            <TouchableOpacity style={styles.botonCompartir} onPress={compartirRecorrido}>
-              <Text style={styles.botonTexto}> Compartir recorrido por WhatsApp</Text>
-            </TouchableOpacity>
-            {!yaLlegue ? (
-              <TouchableOpacity
-                style={styles.botonLlegada}
-                onPress={() => confirmarLlegada(sol._id, tipoConfirmacion)}>
-                <Text style={styles.botonTexto}> Confirmar llegada</Text>
-              </TouchableOpacity>
-            ) : (
-              <Text style={styles.esperando}> Esperando confirmación de la otra...</Text>
-            )}
-          </View>
-        )}
-      </View>
-    );
-  };
-
-  // Obtener marcadores para el mapa según estado activo
-  const getMarkerOtra = () => {
+  const markerOtra = () => {
     if (!detalleActivo) return null;
-    const sol = detalleActivo;
     if (esAcompanante) {
-      const ub = sol.id_usuaria?.ubicacion_actual || sol.ubicacion_usuaria;
-      const foto = sol.id_usuaria?.foto_perfil;
-      if (ub?.latitud) return { ub, foto, nombre: sol.nombre_usuaria, color: '#FF69B4' };
+      const ub = detalleActivo.id_usuaria?.ubicacion_actual || detalleActivo.ubicacion_usuaria;
+      if (ub?.latitud) return { ub, foto: detalleActivo.id_usuaria?.foto_perfil, nombre: detalleActivo.nombre_usuaria, color: COLORES.rosa };
     } else {
-      const ub = sol.id_acompanante?.ubicacion_actual || sol.ubicacion_acompanante;
-      const foto = sol.id_acompanante?.foto_perfil;
-      if (ub?.latitud) return { ub, foto, nombre: sol.nombre_acompanante, color: '#7C3AED' };
+      const ub = detalleActivo.id_acompanante?.ubicacion_actual || detalleActivo.ubicacion_acompanante;
+      if (ub?.latitud) return { ub, foto: detalleActivo.id_acompanante?.foto_perfil, nombre: detalleActivo.nombre_acompanante, color: COLORES.primario };
     }
     return null;
   };
 
-  const markerOtra = getMarkerOtra();
+  const otra = markerOtra();
+  const sol = detalleActivo || acompanamientoActivo;
+  const ubOtra = sol && (esAcompanante
+    ? (sol.id_usuaria?.ubicacion_actual || sol.ubicacion_usuaria)
+    : (sol.id_acompanante?.ubicacion_actual || sol.ubicacion_acompanante));
+  const dist = calcularDistancia(ubicacion?.latitude, ubicacion?.longitude, ubOtra?.latitud, ubOtra?.longitud);
+  const nombreOtra = sol && (esAcompanante ? sol.nombre_usuaria : sol.nombre_acompanante);
+  const yaConfirme = sol && (esAcompanante ? sol.confirmacion_acompanante : sol.confirmacion_usuaria);
+  const yaLlegue = sol && (esAcompanante ? sol.llegada_acompanante : sol.llegada_usuaria);
+  const tipo = esAcompanante ? 'acompanante' : 'usuaria';
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
+
+      {/* Modal calificacion */}
+      <Modal visible={modalCalificar} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitulo}>Califica el recorrido</Text>
+            <Text style={styles.modalSub}>
+              {esAcompanante ? `Como fue acompanar a ${sol?.nombre_usuaria}?` : `Como fue tu acompanante ${sol?.nombre_acompanante}?`}
+            </Text>
+
+            <View style={styles.estrellas}>
+              {[1, 2, 3, 4, 5].map(n => (
+                <TouchableOpacity key={n} onPress={() => setCalificacion(n)}>
+                  <Star
+                    size={36}
+                    color={n <= calificacion ? COLORES.alerta : COLORES.borde}
+                    fill={n <= calificacion ? COLORES.alerta : 'transparent'}
+                  />
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Escribe una resena (opcional)..."
+              placeholderTextColor={COLORES.textoMuted}
+              value={resena}
+              onChangeText={setResena}
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+            />
+
+            <View style={styles.modalBotones}>
+              <TouchableOpacity
+                style={styles.modalCancelar}
+                onPress={() => { setModalCalificar(false); setCalificacion(0); setResena(''); }}>
+                <Text style={styles.modalCancelarTexto}>Omitir</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalConfirmar}
+                onPress={enviarCalificacion}
+                disabled={enviandoCalif}>
+                {enviandoCalif
+                  ? <ActivityIndicator color="#fff" size="small" />
+                  : <Text style={styles.modalConfirmarTexto}>Enviar</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={styles.volver}>{'< Volver'}</Text>
+        <TouchableOpacity style={styles.headerBtn} onPress={() => navigation.goBack()}>
+          <ChevronLeft size={22} color={COLORES.texto} />
         </TouchableOpacity>
-        <Text style={styles.titulo}> GPS Sorori</Text>
-        <TouchableOpacity onPress={refrescar}>
-          <Text style={styles.refrescarBtn}>↻</Text>
+        <View style={styles.headerCenter}>
+          <MapPin size={16} color={COLORES.secundario} />
+          <Text style={styles.headerTitulo}>GPS Sorori</Text>
+        </View>
+        <TouchableOpacity style={styles.headerBtn} onPress={refrescar}>
+          <RefreshCw size={18} color={COLORES.texto} />
         </TouchableOpacity>
       </View>
 
@@ -357,8 +414,8 @@ export default function GPSScreen({ navigation }) {
       <View style={styles.mapaContainer}>
         {cargando ? (
           <View style={styles.mapaLoading}>
-            <ActivityIndicator color="#7C3AED" />
-            <Text style={{ color: '#aaa', marginTop: 8 }}>Obteniendo ubicación...</Text>
+            <ActivityIndicator color={COLORES.primario} size="large" />
+            <Text style={styles.mapaLoadingTexto}>Obteniendo ubicacion...</Text>
           </View>
         ) : ubicacion ? (
           <MapView
@@ -367,175 +424,358 @@ export default function GPSScreen({ navigation }) {
             initialRegion={{
               latitude: ubicacion.latitude,
               longitude: ubicacion.longitude,
-              latitudeDelta: 0.01,
-              longitudeDelta: 0.01,
-            }}>
+              latitudeDelta: 0.012,
+              longitudeDelta: 0.012,
+            }}
+            customMapStyle={mapStyle}>
             <UrlTile
               urlTemplate="https://tile.openstreetmap.fr/hot/{z}/{x}/{y}.png"
-              maximumZ={19}
-              flipY={false}
-              tileSize={256}
+              maximumZ={19} flipY={false} tileSize={256}
             />
 
-            {/* Mi marcador */}
-            <Marker
-              coordinate={{ latitude: ubicacion.latitude, longitude: ubicacion.longitude }}
-              title="Tú estás aquí">
+            {/* Mi ubicacion */}
+            <Marker coordinate={{ latitude: ubicacion.latitude, longitude: ubicacion.longitude }}>
               <View style={styles.miMarker}>
-                <View style={styles.miMarkerPunto} />
+                <View style={styles.miMarkerInner} />
               </View>
             </Marker>
 
-            {/* Marcador de la otra persona en recorrido activo */}
-            {markerOtra && (
-              <Marker
-                coordinate={{
-                  latitude: markerOtra.ub.latitud,
-                  longitude: markerOtra.ub.longitud,
-                }}
-                title={markerOtra.nombre || 'Sorori'}>
-                <MarkerFoto
-                  foto={markerOtra.foto}
-                  emoji={esAcompanante ? '🌸' : '💜'}
-                  color={markerOtra.color}
-                />
-              </Marker>
+            {/* Radio búsqueda */}
+            {tab === 'solicitar' && (
+              <Circle
+                center={{ latitude: ubicacion.latitude, longitude: ubicacion.longitude }}
+                radius={600}
+                fillColor="rgba(124,58,237,0.07)"
+                strokeColor="rgba(124,58,237,0.25)"
+                strokeWidth={1}
+              />
             )}
 
-            {/* Solicitudes en el mapa (tab ayudar) */}
-            {tab === 'ayudar' && !acompanamientoActivo && solicitudes.map((sol, i) =>
-              sol.ubicacion_usuaria?.latitud && (
+            {/* Acompanantes disponibles */}
+            {tab === 'solicitar' && disponibles.map((d, i) =>
+              d.ubicacion_actual?.latitud && (
                 <Marker
-                  key={i}
-                  coordinate={{
-                    latitude: sol.ubicacion_usuaria.latitud,
-                    longitude: sol.ubicacion_usuaria.longitud,
-                  }}
-                  title={sol.id_usuaria?.nombre_completo || 'Sorori'}
-                  onPress={() => aceptarSolicitud(sol)}>
-                  <MarkerFoto
-                    foto={sol.id_usuaria?.foto_perfil}
-                    emoji=""
-                    color="#FF69B4"
-                  />
+                  key={`disp-${i}`}
+                  coordinate={{ latitude: d.ubicacion_actual.latitud, longitude: d.ubicacion_actual.longitud }}
+                  title={d.nombre_completo}>
+                  <View style={styles.disponibleMarker}>
+                    <View style={styles.disponibleDot} />
+                  </View>
                 </Marker>
               )
+            )}
+
+            {/* Solicitudes en mapa */}
+            {tab === 'ayudar' && !acompanamientoActivo && solicitudes.map((s, i) =>
+              s.ubicacion_usuaria?.latitud && (
+                <Marker
+                  key={`sol-${i}`}
+                  coordinate={{ latitude: s.ubicacion_usuaria.latitud, longitude: s.ubicacion_usuaria.longitud }}
+                  onPress={() => aceptarSolicitud(s)}>
+                  <View style={styles.solicitudMarker}>
+                    <AlertTriangle size={14} color="#fff" />
+                  </View>
+                </Marker>
+              )
+            )}
+
+            {/* Otra persona en recorrido */}
+            {otra && (
+              <Marker coordinate={{ latitude: otra.ub.latitud, longitude: otra.ub.longitud }} title={otra.nombre}>
+                <View style={[styles.otraMarker, { borderColor: otra.color }]}>
+                  {otra.foto
+                    ? <Image source={{ uri: otra.foto }} style={styles.otraMarkerImg} />
+                    : <Users size={18} color={otra.color} />}
+                </View>
+              </Marker>
             )}
           </MapView>
         ) : (
           <View style={styles.mapaLoading}>
-            <Text style={{ color: '#aaa' }}>Sin ubicación</Text>
+            <MapPin size={32} color={COLORES.borde} />
+            <Text style={styles.mapaLoadingTexto}>Sin ubicacion disponible</Text>
+          </View>
+        )}
+
+        {/* Boton panico SIEMPRE visible */}
+        <TouchableOpacity
+          style={[styles.botonPanico, panico && { opacity: 0.7 }]}
+          onPress={() => {
+            Alert.alert(
+              'Alerta de panico',
+              'Esto enviara una solicitud de ayuda URGENTE a todas las acompanantes cercanas. Confirmas?',
+              [
+                { text: 'Cancelar', style: 'cancel' },
+                { text: 'Si, pedir ayuda urgente', style: 'destructive', onPress: activarPanico }
+              ]
+            );
+          }}
+          disabled={panico}>
+          {panico
+            ? <ActivityIndicator color="#fff" size="small" />
+            : <Phone size={20} color="#fff" />}
+        </TouchableOpacity>
+
+        {/* Leyenda del mapa */}
+        {tab === 'solicitar' && disponibles.length > 0 && (
+          <View style={styles.leyenda}>
+            <View style={styles.leyendaItem}>
+              <View style={styles.disponibleDot} />
+              <Text style={styles.leyendaTexto}>{disponibles.length} disponibles</Text>
+            </View>
           </View>
         )}
       </View>
 
       {/* Panel activo */}
-      {renderPanelActivo()}
+      {acompanamientoActivo && (
+        <View style={styles.panelActivo}>
+          <View style={styles.panelActivoHeader}>
+            <View style={[styles.panelEstadoDot, { backgroundColor: estadoColor(sol.estado) }]} />
+            <Text style={styles.panelActivoTitulo}>
+              {sol.estado === 'aceptado' ? 'Yendo al encuentro' : 'Recorrido en curso'}
+            </Text>
+            <View style={[styles.estadoChip, { backgroundColor: estadoColor(sol.estado) + '20' }]}>
+              <Text style={[styles.estadoChipTexto, { color: estadoColor(sol.estado) }]}>
+                {estadoTexto(sol.estado)}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.panelActivoInfo}>
+            <View style={styles.panelActivoUsuaria}>
+              <View style={styles.panelActivoAvatar}>
+                {esAcompanante
+                  ? <Shield size={16} color={COLORES.rosa} />
+                  : <UserCheck size={16} color={COLORES.secundario} />}
+              </View>
+              <View>
+                <Text style={styles.panelActivoLabel}>{esAcompanante ? 'Ayudando a' : 'Tu acompanante'}</Text>
+                <Text style={styles.panelActivoNombre}>{nombreOtra}</Text>
+              </View>
+            </View>
+            {dist && (
+              <View style={styles.distanciaChip}>
+                <Navigation size={12} color={COLORES.acento} />
+                <Text style={styles.distanciaTexto}>{dist}</Text>
+              </View>
+            )}
+          </View>
+
+          {sol.destino ? (
+            <View style={styles.destinoRow}>
+              <MapPin size={12} color={COLORES.textoMuted} />
+              <Text style={styles.destinoTexto}>Destino: {sol.destino}</Text>
+            </View>
+          ) : null}
+
+          <View style={styles.panelAcciones}>
+            {sol.estado === 'aceptado' && (
+              !yaConfirme ? (
+                <TouchableOpacity style={styles.botonConfirmar} onPress={() => confirmarEncuentro(sol._id, tipo)}>
+                  <CheckCircle size={15} color="#fff" />
+                  <Text style={styles.botonTexto}>Ya estamos juntas</Text>
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.esperandoRow}>
+                  <Clock size={13} color={COLORES.textoSub} />
+                  <Text style={styles.esperandoTexto}>Esperando confirmacion...</Text>
+                </View>
+              )
+            )}
+
+            {sol.estado === 'en_curso' && (
+              <View style={styles.accionesEnCurso}>
+                <TouchableOpacity style={styles.botonCompartir} onPress={compartirRecorrido}>
+                  <Share2 size={15} color={COLORES.primario} />
+                  <Text style={[styles.botonTexto, { color: COLORES.primario }]}>Compartir</Text>
+                </TouchableOpacity>
+                {!yaLlegue ? (
+                  <TouchableOpacity style={styles.botonLlegada} onPress={() => confirmarLlegada(sol._id, tipo)}>
+                    <Flag size={15} color="#fff" />
+                    <Text style={styles.botonTexto}>Llegamos</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <View style={styles.esperandoRow}>
+                    <Clock size={13} color={COLORES.textoSub} />
+                    <Text style={styles.esperandoTexto}>Esperando...</Text>
+                  </View>
+                )}
+              </View>
+            )}
+          </View>
+        </View>
+      )}
 
       {/* Tabs */}
-      <View style={styles.tabs}>
-        {[
-          { key: 'solicitar', label: ' Pedir ayuda' },
-          { key: 'ayudar', label: ` Ayudar (${solicitudes.length})` },
-          { key: 'mis', label: ' Mis solicitudes' },
-        ].map(t => (
+      <View style={styles.tabsContainer}>
+        {TABS.map(({ key, label, Icon }) => (
           <TouchableOpacity
-            key={t.key}
-            style={[styles.tab, tab === t.key && styles.tabActivo]}
-            onPress={() => setTab(t.key)}>
-            <Text style={[styles.tabTexto, tab === t.key && styles.tabTextoActivo]}>
-              {t.label}
+            key={key}
+            style={[styles.tab, tab === key && styles.tabActivo]}
+            onPress={() => setTab(key)}>
+            <Icon size={15} color={tab === key ? COLORES.primario : COLORES.textoMuted} />
+            <Text style={[styles.tabTexto, tab === key && styles.tabTextoActivo]}>
+              {key === 'ayudar' && solicitudes.length > 0 ? `${label} (${solicitudes.length})` : label}
             </Text>
           </TouchableOpacity>
         ))}
       </View>
 
+      {/* Contenido */}
       <ScrollView
-        style={styles.content}
+        style={styles.scroll}
         refreshControl={
-          <RefreshControl
-            refreshing={refrescando}
-            onRefresh={refrescar}
-            colors={['#7C3AED']}
-            tintColor="#7C3AED"
-          />
+          <RefreshControl refreshing={refrescando} onRefresh={refrescar} colors={[COLORES.primario]} tintColor={COLORES.primario} />
         }>
 
-        {/* TAB: Pedir ayuda */}
+        {/* PEDIR AYUDA */}
         {tab === 'solicitar' && (
           <View style={styles.seccion}>
-            <Text style={styles.seccionTitulo}>¿Necesitas una acompañante? </Text>
-            <Text style={styles.seccionSub}>
-              Una sorori cercana irá a acompañarte. Tu ubicación se compartirá con ella.
-            </Text>
+            {disponibles.length > 0 ? (
+              <View style={styles.disponiblesInfo}>
+                <View style={styles.disponibleDot} />
+                <Text style={styles.disponiblesTexto}>
+                  {disponibles.length} acompanante{disponibles.length > 1 ? 's' : ''} disponible{disponibles.length > 1 ? 's' : ''} cerca de ti
+                </Text>
+              </View>
+            ) : (
+              <View style={[styles.disponiblesInfo, { borderColor: COLORES.alerta + '40', backgroundColor: COLORES.alerta + '10' }]}>
+                <AlertCircle size={14} color={COLORES.alerta} />
+                <Text style={[styles.disponiblesTexto, { color: COLORES.alerta }]}>
+                  Sin acompanantes disponibles en este momento
+                </Text>
+              </View>
+            )}
+
+            <Text style={styles.seccionLabel}>Cual es tu situacion?</Text>
+            <View style={styles.situacionesGrid}>
+              {SITUACIONES.map((s) => (
+                <TouchableOpacity
+                  key={s.key}
+                  style={[styles.situacionChip, situacionTipo === s.key && styles.situacionChipActivo]}
+                  onPress={() => setSituacionTipo(s.key)}>
+                  <s.Icon size={16} color={situacionTipo === s.key ? '#fff' : COLORES.textoSub} />
+                  <Text style={[styles.situacionTexto, situacionTipo === s.key && styles.situacionTextoActivo]}>
+                    {s.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.seccionLabel}>Destino (opcional)</Text>
             <TextInput
               style={styles.input}
-              placeholder="Describe tu situación (opcional)..."
-              placeholderTextColor="#555"
+              placeholder="A donde necesitas llegar..."
+              placeholderTextColor={COLORES.textoMuted}
+              value={destino}
+              onChangeText={setDestino}
+            />
+
+            <Text style={styles.seccionLabel}>Descripcion adicional (opcional)</Text>
+            <TextInput
+              style={[styles.input, { minHeight: 70 }]}
+              placeholder="Agrega mas detalles si quieres..."
+              placeholderTextColor={COLORES.textoMuted}
               value={descripcion}
               onChangeText={setDescripcion}
               multiline
-              numberOfLines={2}
+              textAlignVertical="top"
             />
+
             <TouchableOpacity
-              style={styles.botonSolicitar}
+              style={[styles.botonSolicitar, (enviando || !situacionTipo) && { opacity: 0.6 }]}
               onPress={solicitarAcompanamiento}
-              disabled={enviando}>
+              disabled={enviando || !situacionTipo}>
               {enviando
-                ? <ActivityIndicator color="#fff" />
-                : <Text style={styles.botonTexto}>Solicitar acompañamiento</Text>}
+                ? <ActivityIndicator color="#fff" size="small" />
+                : <>
+                    <Shield size={18} color="#fff" />
+                    <Text style={styles.botonSolicitarTexto}>Solicitar acompanamiento</Text>
+                  </>}
             </TouchableOpacity>
+
+            <View style={styles.infoRow}>
+              <View style={styles.infoItem}>
+                <CheckCircle size={13} color={COLORES.exito} />
+                <Text style={styles.infoTexto}>Ubicacion compartida</Text>
+              </View>
+              <View style={styles.infoItem}>
+                <Shield size={13} color={COLORES.exito} />
+                <Text style={styles.infoTexto}>100% confidencial</Text>
+              </View>
+            </View>
           </View>
         )}
 
-        {/* TAB: Ayudar */}
+        {/* AYUDAR */}
         {tab === 'ayudar' && (
           <View style={styles.seccion}>
-            <Text style={styles.seccionTitulo}>Solicitudes cercanas </Text>
+            <View style={styles.seccionHeader}>
+              <Users size={18} color={COLORES.primario} />
+              <Text style={styles.seccionTitulo}>
+                {solicitudes.length > 0 ? `${solicitudes.length} solicitudes cercanas` : 'Sin solicitudes activas'}
+              </Text>
+            </View>
+
             {solicitudes.length === 0 ? (
               <View style={styles.vacio}>
-                <Text style={styles.vacioEmoji}></Text>
-                <Text style={styles.vacioTexto}>No hay solicitudes pendientes</Text>
-                <Text style={styles.vacioSub}>¡Todo está tranquilo por ahora!</Text>
+                <View style={styles.vacioIcono}>
+                  <Users size={28} color={COLORES.textoMuted} />
+                </View>
+                <Text style={styles.vacioTexto}>Todo tranquilo por ahora</Text>
+                <Text style={styles.vacioSub}>Las solicitudes de ayuda apareceran aqui</Text>
               </View>
             ) : (
-              solicitudes.map((sol, i) => {
-                const dist = calcularDistancia(
+              solicitudes.map((s, i) => {
+                const situacion = SITUACIONES.find(sit => sit.key === s.situacion_tipo);
+                const distancia = calcularDistancia(
                   ubicacion?.latitude, ubicacion?.longitude,
-                  sol.ubicacion_usuaria?.latitud, sol.ubicacion_usuaria?.longitud
+                  s.ubicacion_usuaria?.latitud, s.ubicacion_usuaria?.longitud
                 );
                 return (
-                  <View key={i} style={styles.card}>
-                    <View style={styles.cardTop}>
-                      <View style={styles.cardAvatar}>
-                        {sol.id_usuaria?.foto_perfil ? (
-                          <Image
-                            source={{ uri: sol.id_usuaria.foto_perfil }}
-                            style={{ width: 44, height: 44, borderRadius: 22 }}
-                          />
-                        ) : (
-                          <Text style={{ fontSize: 22 }}></Text>
-                        )}
+                  <View key={i} style={styles.solicitudCard}>
+                    <View style={styles.solicitudCardHeader}>
+                      <View style={styles.solicitudAvatar}>
+                        {s.id_usuaria?.foto_perfil
+                          ? <Image source={{ uri: s.id_usuaria.foto_perfil }} style={styles.solicitudAvatarImg} />
+                          : <Users size={20} color={COLORES.textoSub} />}
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={styles.cardNombre}>
-                          {sol.id_usuaria?.nombre_completo || 'Sorori'}
-                        </Text>
-                        <Text style={styles.cardHora}>
-                          {new Date(sol.fecha_solicitud).toLocaleTimeString('es-MX', {
-                            hour: '2-digit', minute: '2-digit'
-                          })}
+                        <Text style={styles.solicitudNombre}>{s.id_usuaria?.nombre_completo || 'Sorori'}</Text>
+                        <Text style={styles.solicitudHora}>
+                          {new Date(s.fecha_solicitud).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
                         </Text>
                       </View>
-                      <Text style={styles.cardDist}> {dist}</Text>
+                      {distancia && (
+                        <View style={styles.distanciaChip}>
+                          <Navigation size={11} color={COLORES.acento} />
+                          <Text style={styles.distanciaTexto}>{distancia}</Text>
+                        </View>
+                      )}
                     </View>
-                    {sol.descripcion && (
-                      <Text style={styles.cardDesc}>"{sol.descripcion}"</Text>
+
+                    {situacion && (
+                      <View style={styles.situacionTag}>
+                        <situacion.Icon size={12} color={COLORES.secundario} />
+                        <Text style={styles.situacionTagTexto}>{situacion.label}</Text>
+                      </View>
                     )}
-                    <TouchableOpacity
-                      style={styles.botonAceptar}
-                      onPress={() => aceptarSolicitud(sol)}>
-                      <Text style={styles.botonTexto}> Ir a ayudar</Text>
+
+                    {s.destino ? (
+                      <View style={styles.destinoRow}>
+                        <MapPin size={11} color={COLORES.textoMuted} />
+                        <Text style={styles.destinoTexto}>Destino: {s.destino}</Text>
+                      </View>
+                    ) : null}
+
+                    {s.descripcion ? (
+                      <Text style={styles.solicitudDesc}>{s.descripcion}</Text>
+                    ) : null}
+
+                    <TouchableOpacity style={styles.botonAceptar} onPress={() => aceptarSolicitud(s)}>
+                      <UserCheck size={15} color="#fff" />
+                      <Text style={styles.botonTexto}>Ir a ayudar</Text>
                     </TouchableOpacity>
                   </View>
                 );
@@ -544,205 +784,288 @@ export default function GPSScreen({ navigation }) {
           </View>
         )}
 
-        {/* TAB: Mis solicitudes */}
+        {/* HISTORIAL */}
         {tab === 'mis' && (
           <View style={styles.seccion}>
-            <Text style={styles.seccionTitulo}>Mis solicitudes</Text>
-
-            {/* Como acompañante */}
             {misAceptaciones.length > 0 && (
               <>
-                <Text style={styles.seccionSubtitulo}>Como acompañante </Text>
-                {misAceptaciones.map((sol, i) => (
-                  <View key={`ac-${i}`} style={[styles.card, ['aceptado', 'en_curso'].includes(sol.estado) && styles.cardActivo]}>
-                    <View style={styles.cardTop}>
-                      <View style={styles.cardAvatar}>
-                        {sol.id_usuaria?.foto_perfil ? (
-                          <Image
-                            source={{ uri: sol.id_usuaria.foto_perfil }}
-                            style={{ width: 44, height: 44, borderRadius: 22 }}
-                          />
-                        ) : (
-                          <Text style={{ fontSize: 22 }}></Text>
-                        )}
+                <Text style={styles.subTitulo}>Como acompanante</Text>
+                {misAceptaciones.map((s, i) => (
+                  <View key={`ac-${i}`} style={[styles.historialCard, ['aceptado', 'en_curso'].includes(s.estado) && styles.historialCardActivo]}>
+                    <View style={styles.historialTop}>
+                      <View style={styles.solicitudAvatar}>
+                        {s.id_usuaria?.foto_perfil
+                          ? <Image source={{ uri: s.id_usuaria.foto_perfil }} style={styles.solicitudAvatarImg} />
+                          : <Users size={18} color={COLORES.textoSub} />}
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={styles.cardNombre}>
-                          {sol.nombre_usuaria || sol.id_usuaria?.nombre_completo || 'Sorori'}
-                        </Text>
-                        <Text style={styles.cardHora}>
-                          {new Date(sol.fecha_solicitud).toLocaleString('es-MX', {
-                            day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
-                          })}
+                        <Text style={styles.solicitudNombre}>{s.nombre_usuaria || 'Sorori'}</Text>
+                        <Text style={styles.solicitudHora}>
+                          {new Date(s.fecha_solicitud).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                         </Text>
                       </View>
-                      <View style={[styles.estadoBadge, { backgroundColor: estadoColor(sol.estado) }]}>
-                        <Text style={styles.estadoBadgeTexto}>{estadoTexto(sol.estado)}</Text>
+                      <View style={[styles.estadoChip, { backgroundColor: estadoColor(s.estado) + '20' }]}>
+                        <Text style={[styles.estadoChipTexto, { color: estadoColor(s.estado) }]}>{estadoTexto(s.estado)}</Text>
                       </View>
                     </View>
-                    {sol.descripcion && <Text style={styles.cardDesc}>"{sol.descripcion}"</Text>}
-
-                    {sol.estado === 'aceptado' && !sol.confirmacion_acompanante && (
-                      <TouchableOpacity
-                        style={styles.botonConfirmar}
-                        onPress={() => confirmarEncuentro(sol._id, 'acompanante')}>
-                        <Text style={styles.botonTexto}> Ya estamos juntas</Text>
+                    {s.estado === 'completado' && s.calificacion_a_acompanante && (
+                      <View style={styles.calificacionRow}>
+                        {[1,2,3,4,5].map(n => (
+                          <Star key={n} size={14} color={n <= s.calificacion_a_acompanante ? COLORES.alerta : COLORES.borde} fill={n <= s.calificacion_a_acompanante ? COLORES.alerta : 'transparent'} />
+                        ))}
+                        <Text style={styles.calificacionTexto}>{s.calificacion_a_acompanante}/5</Text>
+                      </View>
+                    )}
+                    {s.estado === 'aceptado' && !s.confirmacion_acompanante && (
+                      <TouchableOpacity style={styles.botonConfirmar} onPress={() => confirmarEncuentro(s._id, 'acompanante')}>
+                        <CheckCircle size={15} color="#fff" />
+                        <Text style={styles.botonTexto}>Ya estamos juntas</Text>
                       </TouchableOpacity>
                     )}
-                    {sol.estado === 'aceptado' && sol.confirmacion_acompanante && (
-                      <Text style={styles.esperando}> Esperando confirmación de ella...</Text>
-                    )}
-                    {sol.estado === 'en_curso' && (
-                      <>
-                        <TouchableOpacity style={styles.botonCompartir} onPress={compartirRecorrido}>
-                          <Text style={styles.botonTexto}> Compartir recorrido</Text>
-                        </TouchableOpacity>
-                        {!sol.llegada_acompanante ? (
-                          <TouchableOpacity
-                            style={styles.botonLlegada}
-                            onPress={() => confirmarLlegada(sol._id, 'acompanante')}>
-                            <Text style={styles.botonTexto}> Confirmar llegada</Text>
-                          </TouchableOpacity>
-                        ) : (
-                          <Text style={styles.esperando}> Esperando confirmación de ella...</Text>
-                        )}
-                      </>
+                    {s.estado === 'en_curso' && !s.llegada_acompanante && (
+                      <TouchableOpacity style={styles.botonLlegada} onPress={() => confirmarLlegada(s._id, 'acompanante')}>
+                        <Flag size={15} color="#fff" />
+                        <Text style={styles.botonTexto}>Confirmar llegada</Text>
+                      </TouchableOpacity>
                     )}
                   </View>
                 ))}
               </>
             )}
 
-            {/* Como usuaria */}
-            <Text style={styles.seccionSubtitulo}>Mis peticiones </Text>
+            <Text style={styles.subTitulo}>Mis peticiones</Text>
             {misSolicitudes.length === 0 ? (
               <View style={styles.vacio}>
-                <Text style={styles.vacioEmoji}></Text>
-                <Text style={styles.vacioTexto}>No has hecho solicitudes aún</Text>
+                <View style={styles.vacioIcono}>
+                  <Clock size={28} color={COLORES.textoMuted} />
+                </View>
+                <Text style={styles.vacioTexto}>Sin solicitudes aun</Text>
               </View>
             ) : (
-              misSolicitudes.map((sol, i) => (
-                <View key={`sol-${i}`} style={[styles.card, ['aceptado', 'en_curso'].includes(sol.estado) && styles.cardActivo]}>
-                  <View style={styles.cardTop}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.cardNombre}>Solicitud #{misSolicitudes.length - i}</Text>
-                      <Text style={styles.cardHora}>
-                        {new Date(sol.fecha_solicitud).toLocaleString('es-MX', {
-                          day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
-                        })}
-                      </Text>
+              misSolicitudes.map((s, i) => {
+                const situacion = SITUACIONES.find(sit => sit.key === s.situacion_tipo);
+                return (
+                  <View key={`sol-${i}`} style={[styles.historialCard, ['aceptado', 'en_curso'].includes(s.estado) && styles.historialCardActivo]}>
+                    <View style={styles.historialTop}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.solicitudNombre}>Solicitud {misSolicitudes.length - i}</Text>
+                        <Text style={styles.solicitudHora}>
+                          {new Date(s.fecha_solicitud).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                        </Text>
+                      </View>
+                      <View style={[styles.estadoChip, { backgroundColor: estadoColor(s.estado) + '20' }]}>
+                        <Text style={[styles.estadoChipTexto, { color: estadoColor(s.estado) }]}>{estadoTexto(s.estado)}</Text>
+                      </View>
                     </View>
-                    <View style={[styles.estadoBadge, { backgroundColor: estadoColor(sol.estado) }]}>
-                      <Text style={styles.estadoBadgeTexto}>{estadoTexto(sol.estado)}</Text>
-                    </View>
-                  </View>
 
-                  {sol.nombre_acompanante && (
-                    <Text style={styles.cardDesc}> Acompañante: {sol.nombre_acompanante}</Text>
-                  )}
-                  {sol.descripcion && <Text style={styles.cardDesc}>"{sol.descripcion}"</Text>}
+                    {situacion && (
+                      <View style={styles.situacionTag}>
+                        <situacion.Icon size={12} color={COLORES.secundario} />
+                        <Text style={styles.situacionTagTexto}>{situacion.label}</Text>
+                      </View>
+                    )}
 
-                  {sol.estado === 'aceptado' && !sol.confirmacion_usuaria && (
-                    <TouchableOpacity
-                      style={styles.botonConfirmar}
-                      onPress={() => confirmarEncuentro(sol._id, 'usuaria')}>
-                      <Text style={styles.botonTexto}> Ya estamos juntas</Text>
-                    </TouchableOpacity>
-                  )}
-                  {sol.estado === 'aceptado' && sol.confirmacion_usuaria && (
-                    <Text style={styles.esperando}> Esperando confirmación de tu acompañante...</Text>
-                  )}
-                  {sol.estado === 'en_curso' && (
-                    <>
-                      <TouchableOpacity style={styles.botonCompartir} onPress={compartirRecorrido}>
-                        <Text style={styles.botonTexto}> Compartir recorrido</Text>
+                    {s.nombre_acompanante && (
+                      <Text style={styles.solicitudDesc}>Acompanante: {s.nombre_acompanante}</Text>
+                    )}
+
+                    {s.estado === 'completado' && s.calificacion_a_usuaria && (
+                      <View style={styles.calificacionRow}>
+                        {[1,2,3,4,5].map(n => (
+                          <Star key={n} size={14} color={n <= s.calificacion_a_usuaria ? COLORES.alerta : COLORES.borde} fill={n <= s.calificacion_a_usuaria ? COLORES.alerta : 'transparent'} />
+                        ))}
+                        <Text style={styles.calificacionTexto}>{s.calificacion_a_usuaria}/5</Text>
+                      </View>
+                    )}
+
+                    {s.estado === 'aceptado' && !s.confirmacion_usuaria && (
+                      <TouchableOpacity style={styles.botonConfirmar} onPress={() => confirmarEncuentro(s._id, 'usuaria')}>
+                        <CheckCircle size={15} color="#fff" />
+                        <Text style={styles.botonTexto}>Ya estamos juntas</Text>
                       </TouchableOpacity>
-
-                      <TouchableOpacity
-  style={styles.botonChat}
-  onPress={() => navigation.navigate('ChatAcompanamiento', {
-    id: sol._id,
-    nombreOtra: nombreOtra
-  })}>
-  <Text style={styles.botonTexto}>💬 Abrir chat</Text>
-</TouchableOpacity>
-
-
-                      {!sol.llegada_usuaria ? (
-                        <TouchableOpacity
-                          style={styles.botonLlegada}
-                          onPress={() => confirmarLlegada(sol._id, 'usuaria')}>
-                          <Text style={styles.botonTexto}> Confirmar llegada</Text>
-                        </TouchableOpacity>
-
-
-                      ) : (
-                        <Text style={styles.esperando}> Esperando confirmación de tu acompañante...</Text>
-                      )}
-                    </>
-                  )}
-                </View>
-              ))
+                    )}
+                    {s.estado === 'en_curso' && !s.llegada_usuaria && (
+                      <TouchableOpacity style={styles.botonLlegada} onPress={() => confirmarLlegada(s._id, 'usuaria')}>
+                        <Flag size={15} color="#fff" />
+                        <Text style={styles.botonTexto}>Confirmar llegada</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                );
+              })
             )}
           </View>
         )}
+
+        <View style={{ height: 40 }} />
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
+const mapStyle = [
+  { elementType: 'geometry', stylers: [{ color: '#0D0B1A' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#9B94C4' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#0D0B1A' }] },
+  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1E1A35' }] },
+  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#2E2850' }] },
+  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#2D1B69' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#16122A' }] },
+  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+];
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0D0D1A' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 12 },
-  volver: { color: '#9B6DFF', fontSize: 16 },
-  titulo: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  refrescarBtn: { color: '#9B6DFF', fontSize: 22, fontWeight: 'bold' },
-  mapaContainer: { height: 280, marginHorizontal: 16, borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: '#7C3AED' },
+  container: { flex: 1, backgroundColor: COLORES.fondo },
+
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingTop: 54, paddingBottom: 14,
+    backgroundColor: COLORES.superficie, borderBottomWidth: 1, borderBottomColor: COLORES.borde,
+  },
+  headerBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: COLORES.superficie2, alignItems: 'center', justifyContent: 'center' },
+  headerCenter: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerTitulo: { color: COLORES.texto, fontSize: 17, fontWeight: '700' },
+
+  mapaContainer: { height: height * 0.27, borderBottomWidth: 1, borderBottomColor: COLORES.borde },
   mapa: { flex: 1 },
-  mapaLoading: { flex: 1, backgroundColor: '#1E1B3A', justifyContent: 'center', alignItems: 'center' },
-  miMarker: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#7C3AED', borderWidth: 3, borderColor: '#fff', alignItems: 'center', justifyContent: 'center' },
-  miMarkerPunto: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#fff' },
-  markerFoto: { width: 44, height: 44, borderRadius: 22, borderWidth: 3, backgroundColor: '#1E1B3A', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  markerImagen: { width: 44, height: 44, borderRadius: 22 },
-  solicitudMarker: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FF69B4', borderWidth: 2, borderColor: '#fff', alignItems: 'center', justifyContent: 'center' },
-  panelActivo: { backgroundColor: '#2D1B69', marginHorizontal: 16, marginTop: 12, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#7C3AED' },
-  panelHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  panelTitulo: { color: '#fff', fontWeight: 'bold', fontSize: 15, flex: 1 },
-  panelInfo: { color: '#9B6DFF', fontSize: 13, marginBottom: 6 },
-  panelDistancia: { color: '#fff', fontSize: 14, marginBottom: 10, textAlign: 'center', fontWeight: '700' },
-  panelBotones: { gap: 8 },
-  panelSubtitulo: { color: '#aaa', fontSize: 12, textAlign: 'center', marginBottom: 8 },
-  tabs: { flexDirection: 'row', marginHorizontal: 16, marginTop: 12, marginBottom: 4 },
-  tab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: '#1E1B3A' },
-  tabActivo: { borderBottomColor: '#7C3AED' },
-  tabTexto: { color: '#555', fontSize: 11 },
-  tabTextoActivo: { color: '#9B6DFF', fontWeight: 'bold' },
-  content: { flex: 1 },
+  mapaLoading: { flex: 1, backgroundColor: COLORES.superficie, justifyContent: 'center', alignItems: 'center', gap: 12 },
+  mapaLoadingTexto: { color: COLORES.textoSub, fontSize: 13 },
+
+  miMarker: { width: 22, height: 22, borderRadius: 11, backgroundColor: COLORES.primario + '30', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: COLORES.primario },
+  miMarkerInner: { width: 9, height: 9, borderRadius: 5, backgroundColor: COLORES.primario },
+  disponibleMarker: { width: 18, height: 18, borderRadius: 9, backgroundColor: COLORES.exito + '30', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: COLORES.exito },
+  disponibleDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORES.exito },
+  otraMarker: { width: 42, height: 42, borderRadius: 21, backgroundColor: COLORES.superficie, alignItems: 'center', justifyContent: 'center', borderWidth: 2, overflow: 'hidden' },
+  otraMarkerImg: { width: 42, height: 42, borderRadius: 21 },
+  solicitudMarker: { width: 34, height: 34, borderRadius: 17, backgroundColor: COLORES.error, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#fff' },
+
+  botonPanico: {
+    position: 'absolute', bottom: 14, right: 14,
+    width: 52, height: 52, borderRadius: 26,
+    backgroundColor: COLORES.error,
+    alignItems: 'center', justifyContent: 'center',
+    elevation: 8, shadowColor: COLORES.error,
+    shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.5, shadowRadius: 8,
+    borderWidth: 2, borderColor: '#fff',
+  },
+
+  leyenda: { position: 'absolute', bottom: 14, left: 14, backgroundColor: 'rgba(13,11,26,0.85)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: COLORES.borde },
+  leyendaItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  leyendaTexto: { color: COLORES.exito, fontSize: 11, fontWeight: '600' },
+
+  panelActivo: { backgroundColor: COLORES.superficie3, marginHorizontal: 14, marginTop: 10, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: COLORES.primario + '40' },
+  panelActivoHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  panelEstadoDot: { width: 8, height: 8, borderRadius: 4 },
+  panelActivoTitulo: { color: COLORES.texto, fontWeight: '700', fontSize: 13, flex: 1 },
+  panelActivoInfo: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  panelActivoUsuaria: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  panelActivoAvatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: COLORES.superficie2, alignItems: 'center', justifyContent: 'center' },
+  panelActivoLabel: { color: COLORES.textoMuted, fontSize: 11 },
+  panelActivoNombre: { color: COLORES.texto, fontWeight: '600', fontSize: 13 },
+  panelAcciones: { gap: 8 },
+  accionesEnCurso: { flexDirection: 'row', gap: 8 },
+
+  tabsContainer: { flexDirection: 'row', backgroundColor: COLORES.superficie, borderTopWidth: 1, borderTopColor: COLORES.borde, borderBottomWidth: 1, borderBottomColor: COLORES.borde, marginTop: 10 },
+  tab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 11, borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  tabActivo: { borderBottomColor: COLORES.primario },
+  tabTexto: { color: COLORES.textoMuted, fontSize: 11, fontWeight: '500' },
+  tabTextoActivo: { color: COLORES.primario, fontWeight: '700' },
+
+  scroll: { flex: 1 },
   seccion: { padding: 16 },
-  seccionTitulo: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginBottom: 6 },
-  seccionSubtitulo: { color: '#9B6DFF', fontSize: 13, fontWeight: '600', marginBottom: 10, marginTop: 8 },
-  seccionSub: { color: '#aaa', fontSize: 13, marginBottom: 16, lineHeight: 20 },
-  input: { backgroundColor: '#1E1B3A', borderRadius: 12, padding: 14, color: '#fff', fontSize: 14, minHeight: 60, marginBottom: 12 },
-  botonSolicitar: { backgroundColor: '#7C3AED', padding: 16, borderRadius: 14, alignItems: 'center' },
-  botonAceptar: { backgroundColor: '#4CAF50', padding: 12, borderRadius: 10, alignItems: 'center', marginTop: 10 },
-  botonConfirmar: { backgroundColor: '#2196F3', padding: 12, borderRadius: 10, alignItems: 'center', marginTop: 8 },
-  botonCompartir: { backgroundColor: '#FF9800', padding: 12, borderRadius: 10, alignItems: 'center', marginTop: 8 },
-  botonLlegada: { backgroundColor: '#4CAF50', padding: 12, borderRadius: 10, alignItems: 'center', marginTop: 8 },
-  botonTexto: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
-  card: { backgroundColor: '#1E1B3A', borderRadius: 14, padding: 14, marginBottom: 12 },
-  cardActivo: { borderWidth: 1, borderColor: '#7C3AED' },
-  cardTop: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 10 },
-  cardAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#2D1B69', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  cardNombre: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
-  cardHora: { color: '#555', fontSize: 11, marginTop: 2 },
-  cardDist: { color: '#9B6DFF', fontSize: 12, fontWeight: '600' },
-  cardDesc: { color: '#aaa', fontSize: 13, marginBottom: 6, fontStyle: 'italic' },
-  estadoBadge: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
-  estadoBadgeTexto: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
-  esperando: { color: '#aaa', fontSize: 12, textAlign: 'center', marginTop: 8, fontStyle: 'italic' },
-  vacio: { alignItems: 'center', paddingVertical: 40 },
-  vacioEmoji: { fontSize: 40, marginBottom: 12 },
-  vacioTexto: { color: '#aaa', fontSize: 15, fontWeight: '600' },
-  vacioSub: { color: '#555', fontSize: 13, marginTop: 4 },
-  botonChat: { backgroundColor: '#1E1B3A', borderWidth: 1, borderColor: '#7C3AED', padding: 12, borderRadius: 10, alignItems: 'center', marginTop: 8 },
+  seccionHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
+  seccionTitulo: { color: COLORES.texto, fontSize: 15, fontWeight: '700' },
+  seccionLabel: { color: COLORES.textoSub, fontSize: 12, fontWeight: '600', letterSpacing: 0.5, marginBottom: 10, marginTop: 14 },
+  subTitulo: { color: COLORES.secundario, fontSize: 12, fontWeight: '700', letterSpacing: 0.5, marginBottom: 10, marginTop: 16 },
+
+  disponiblesInfo: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: COLORES.exito + '10', borderRadius: 10,
+    padding: 10, marginBottom: 8,
+    borderWidth: 1, borderColor: COLORES.exito + '30',
+  },
+  disponiblesTexto: { color: COLORES.exito, fontSize: 13, fontWeight: '500' },
+
+  situacionesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
+  situacionChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: COLORES.superficie, borderRadius: 12,
+    paddingHorizontal: 12, paddingVertical: 9,
+    borderWidth: 1, borderColor: COLORES.borde,
+    width: (width - 48) / 2,
+  },
+  situacionChipActivo: { backgroundColor: COLORES.primario, borderColor: COLORES.primario },
+  situacionTexto: { color: COLORES.textoSub, fontSize: 12, flex: 1 },
+  situacionTextoActivo: { color: '#fff', fontWeight: '600' },
+
+  input: {
+    backgroundColor: COLORES.superficie, borderRadius: 12,
+    padding: 14, color: COLORES.texto, fontSize: 14,
+    borderWidth: 1, borderColor: COLORES.borde, marginBottom: 4,
+  },
+
+  botonSolicitar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 10, backgroundColor: COLORES.primario,
+    padding: 16, borderRadius: 14, marginTop: 16, marginBottom: 12,
+  },
+  botonSolicitarTexto: { color: '#fff', fontWeight: '700', fontSize: 15 },
+
+  infoRow: { flexDirection: 'row', gap: 16, backgroundColor: COLORES.superficie, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: COLORES.borde },
+  infoItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  infoTexto: { color: COLORES.textoSub, fontSize: 12 },
+
+  solicitudCard: { backgroundColor: COLORES.superficie, borderRadius: 16, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: COLORES.borde },
+  solicitudCardHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
+  solicitudAvatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: COLORES.superficie2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderWidth: 1, borderColor: COLORES.borde },
+  solicitudAvatarImg: { width: 42, height: 42, borderRadius: 21 },
+  solicitudNombre: { color: COLORES.texto, fontWeight: '600', fontSize: 14 },
+  solicitudHora: { color: COLORES.textoMuted, fontSize: 11, marginTop: 2 },
+  solicitudDesc: { color: COLORES.textoSub, fontSize: 13, fontStyle: 'italic', marginBottom: 10 },
+
+  situacionTag: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: COLORES.superficie3, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, alignSelf: 'flex-start', marginBottom: 8 },
+  situacionTagTexto: { color: COLORES.secundario, fontSize: 11, fontWeight: '600' },
+
+  destinoRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+  destinoTexto: { color: COLORES.textoSub, fontSize: 12 },
+
+  historialCard: { backgroundColor: COLORES.superficie, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: COLORES.borde },
+  historialCardActivo: { borderColor: COLORES.primario + '50' },
+  historialTop: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
+
+  estadoChip: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
+  estadoChipTexto: { fontSize: 10, fontWeight: '700' },
+
+  distanciaChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: COLORES.superficie3, borderRadius: 10, paddingHorizontal: 9, paddingVertical: 5, borderWidth: 1, borderColor: COLORES.borde },
+  distanciaTexto: { color: COLORES.acento, fontSize: 12, fontWeight: '600' },
+
+  calificacionRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 8 },
+  calificacionTexto: { color: COLORES.alerta, fontSize: 12, fontWeight: '600', marginLeft: 4 },
+
+  botonAceptar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: COLORES.exito, padding: 11, borderRadius: 10 },
+  botonConfirmar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#3B82F6', padding: 11, borderRadius: 10 },
+  botonCompartir: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: COLORES.superficie2, padding: 11, borderRadius: 10, borderWidth: 1, borderColor: COLORES.primario },
+  botonLlegada: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: COLORES.exito, padding: 11, borderRadius: 10 },
+  botonTexto: { color: '#fff', fontWeight: '700', fontSize: 13 },
+
+  esperandoRow: { flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: 'center', padding: 8 },
+  esperandoTexto: { color: COLORES.textoSub, fontSize: 12, fontStyle: 'italic' },
+
+  vacio: { alignItems: 'center', paddingVertical: 40, gap: 12 },
+  vacioIcono: { width: 64, height: 64, borderRadius: 32, backgroundColor: COLORES.superficie, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: COLORES.borde },
+  vacioTexto: { color: COLORES.texto, fontSize: 15, fontWeight: '600' },
+  vacioSub: { color: COLORES.textoSub, fontSize: 13, textAlign: 'center' },
+
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', padding: 24 },
+  modalContent: { backgroundColor: COLORES.superficie, borderRadius: 20, padding: 24, borderWidth: 1, borderColor: COLORES.borde },
+  modalTitulo: { color: COLORES.texto, fontSize: 18, fontWeight: '700', textAlign: 'center', marginBottom: 6 },
+  modalSub: { color: COLORES.textoSub, fontSize: 13, textAlign: 'center', marginBottom: 20 },
+  estrellas: { flexDirection: 'row', justifyContent: 'center', gap: 8, marginBottom: 20 },
+  modalInput: { backgroundColor: COLORES.fondo, borderRadius: 12, padding: 12, color: COLORES.texto, fontSize: 14, minHeight: 80, borderWidth: 1, borderColor: COLORES.borde, marginBottom: 20, textAlignVertical: 'top' },
+  modalBotones: { flexDirection: 'row', gap: 10 },
+  modalCancelar: { flex: 1, backgroundColor: COLORES.superficie2, padding: 14, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: COLORES.borde },
+  modalCancelarTexto: { color: COLORES.textoSub, fontWeight: '600' },
+  modalConfirmar: { flex: 1, backgroundColor: COLORES.primario, padding: 14, borderRadius: 10, alignItems: 'center' },
+  modalConfirmarTexto: { color: '#fff', fontWeight: '700' },
 });

@@ -2,8 +2,13 @@ const router = require('express').Router();
 const Acompanamiento = require('../models/Acompanamiento');
 const Usuaria = require('../models/Usuaria');
 const authMiddleware = require('../middleware/auth.middleware');
+const notificar = require('../utils/notificar');
 
-// Registrar como disponible
+router.use((req, res, next) => {
+  console.log('ACOMPANAMIENTOS:', req.method, req.path);
+  next();
+});
+
 router.post('/registrar-disponible', authMiddleware, async (req, res) => {
   try {
     const { latitud, longitud } = req.body;
@@ -17,7 +22,6 @@ router.post('/registrar-disponible', authMiddleware, async (req, res) => {
   }
 });
 
-// Ver acompañantes disponibles
 router.get('/disponibles', authMiddleware, async (req, res) => {
   try {
     const disponibles = await Usuaria.find(
@@ -30,25 +34,6 @@ router.get('/disponibles', authMiddleware, async (req, res) => {
   }
 });
 
-// Solicitar acompañamiento
-router.post('/solicitar', authMiddleware, async (req, res) => {
-  try {
-    const { latitud, longitud, descripcion } = req.body;
-    const usuaria = await Usuaria.findById(req.usuaria.id);
-    const acompanamiento = new Acompanamiento({
-      id_usuaria: req.usuaria.id,
-      nombre_usuaria: usuaria.nombre_completo,
-      ubicacion_usuaria: { latitud, longitud },
-      descripcion: descripcion || ''
-    });
-    await acompanamiento.save();
-    res.status(201).json({ mensaje: 'Solicitud enviada', acompanamiento });
-  } catch (err) {
-    res.status(500).json({ mensaje: 'Error al solicitar', error: err.message });
-  }
-});
-
-// Ver solicitudes pendientes
 router.get('/pendientes', authMiddleware, async (req, res) => {
   try {
     const solicitudes = await Acompanamiento.find({ estado: 'pendiente' })
@@ -60,7 +45,6 @@ router.get('/pendientes', authMiddleware, async (req, res) => {
   }
 });
 
-// Ver mis solicitudes
 router.get('/mis-solicitudes', authMiddleware, async (req, res) => {
   try {
     const solicitudes = await Acompanamiento.find({ id_usuaria: req.usuaria.id })
@@ -72,12 +56,11 @@ router.get('/mis-solicitudes', authMiddleware, async (req, res) => {
   }
 });
 
-// Ver acompañamientos donde soy acompañante
 router.get('/mis-aceptaciones', authMiddleware, async (req, res) => {
   try {
     const aceptaciones = await Acompanamiento.find({
       id_acompanante: req.usuaria.id,
-      estado: { $in: ['aceptado', 'en_curso'] }
+      estado: { $in: ['aceptado', 'en_curso', 'completado'] }
     })
     .populate('id_usuaria', 'nombre_completo foto_perfil ubicacion_actual')
     .sort({ fecha_aceptacion: -1 });
@@ -87,19 +70,42 @@ router.get('/mis-aceptaciones', authMiddleware, async (req, res) => {
   }
 });
 
-// Ver detalle
-router.get('/:id', authMiddleware, async (req, res) => {
+router.post('/solicitar', authMiddleware, async (req, res) => {
   try {
-    const acompanamiento = await Acompanamiento.findById(req.params.id)
-      .populate('id_usuaria', 'nombre_completo foto_perfil ubicacion_actual')
-      .populate('id_acompanante', 'nombre_completo foto_perfil ubicacion_actual');
-    res.json(acompanamiento);
+    const { latitud, longitud, descripcion, situacion_tipo, destino } = req.body;
+    const usuaria = await Usuaria.findById(req.usuaria.id);
+    const acompanamiento = new Acompanamiento({
+      id_usuaria: req.usuaria.id,
+      nombre_usuaria: usuaria.nombre_completo,
+      ubicacion_usuaria: { latitud, longitud },
+      descripcion: descripcion || '',
+      situacion_tipo: situacion_tipo || '',
+      destino: destino || '',
+    });
+    await acompanamiento.save();
+
+    if (situacion_tipo === 'panico') {
+      const disponibles = await Usuaria.find({
+        disponible_acompanante: true,
+        _id: { $ne: req.usuaria.id }
+      });
+      await Promise.all(disponibles.map(d =>
+        notificar(
+          d._id,
+          'alerta_panico',
+          'ALERTA DE PANICO',
+          `${usuaria.nombre_completo} necesita ayuda urgente. Revisa GPS Sorori.`,
+          acompanamiento._id
+        )
+      ));
+    }
+
+    res.status(201).json({ mensaje: 'Solicitud enviada', acompanamiento });
   } catch (err) {
-    res.status(500).json({ mensaje: 'Error' });
+    res.status(500).json({ mensaje: 'Error al solicitar', error: err.message });
   }
 });
 
-// Aceptar solicitud
 router.put('/aceptar/:id', authMiddleware, async (req, res) => {
   try {
     const { latitud, longitud } = req.body;
@@ -115,13 +121,19 @@ router.put('/aceptar/:id', authMiddleware, async (req, res) => {
       },
       { new: true }
     );
+    await notificar(
+      acompanamiento.id_usuaria,
+      'acompanamiento_aceptado',
+      'Acompanamiento aceptado',
+      `${acompanante.nombre_completo} acepto acompanarte. Ve a GPS Sorori.`,
+      acompanamiento._id
+    );
     res.json({ mensaje: 'Aceptado', acompanamiento });
   } catch (err) {
-    res.status(500).json({ mensaje: 'Error' });
+    res.status(500).json({ mensaje: 'Error', error: err.message });
   }
 });
 
-// Confirmar encuentro (usuaria confirma)
 router.put('/confirmar-usuaria/:id', authMiddleware, async (req, res) => {
   try {
     const acompanamiento = await Acompanamiento.findById(req.params.id);
@@ -133,11 +145,10 @@ router.put('/confirmar-usuaria/:id', authMiddleware, async (req, res) => {
     await acompanamiento.save();
     res.json({ mensaje: 'Confirmado', acompanamiento });
   } catch (err) {
-    res.status(500).json({ mensaje: 'Error' });
+    res.status(500).json({ mensaje: 'Error', error: err.message });
   }
 });
 
-// Confirmar encuentro (acompañante confirma)
 router.put('/confirmar-acompanante/:id', authMiddleware, async (req, res) => {
   try {
     const acompanamiento = await Acompanamiento.findById(req.params.id);
@@ -149,11 +160,10 @@ router.put('/confirmar-acompanante/:id', authMiddleware, async (req, res) => {
     await acompanamiento.save();
     res.json({ mensaje: 'Confirmado', acompanamiento });
   } catch (err) {
-    res.status(500).json({ mensaje: 'Error' });
+    res.status(500).json({ mensaje: 'Error', error: err.message });
   }
 });
 
-// Confirmar llegada (usuaria)
 router.put('/llegada-usuaria/:id', authMiddleware, async (req, res) => {
   try {
     const acompanamiento = await Acompanamiento.findById(req.params.id);
@@ -165,11 +175,10 @@ router.put('/llegada-usuaria/:id', authMiddleware, async (req, res) => {
     await acompanamiento.save();
     res.json({ mensaje: 'Llegada confirmada', acompanamiento });
   } catch (err) {
-    res.status(500).json({ mensaje: 'Error' });
+    res.status(500).json({ mensaje: 'Error', error: err.message });
   }
 });
 
-// Confirmar llegada (acompañante)
 router.put('/llegada-acompanante/:id', authMiddleware, async (req, res) => {
   try {
     const acompanamiento = await Acompanamiento.findById(req.params.id);
@@ -181,11 +190,42 @@ router.put('/llegada-acompanante/:id', authMiddleware, async (req, res) => {
     await acompanamiento.save();
     res.json({ mensaje: 'Llegada confirmada', acompanamiento });
   } catch (err) {
-    res.status(500).json({ mensaje: 'Error' });
+    res.status(500).json({ mensaje: 'Error', error: err.message });
   }
 });
 
-// Actualizar ubicación en tiempo real
+router.put('/calificar/:id', authMiddleware, async (req, res) => {
+  try {
+    const { calificacion, resena, rol } = req.body;
+    const acompanamiento = await Acompanamiento.findById(req.params.id);
+    if (!acompanamiento) return res.status(404).json({ mensaje: 'No encontrado' });
+    if (rol === 'usuaria') {
+      acompanamiento.calificacion_a_acompanante = calificacion;
+      acompanamiento.resena_a_acompanante = resena || '';
+    } else {
+      acompanamiento.calificacion_a_usuaria = calificacion;
+      acompanamiento.resena_a_usuaria = resena || '';
+    }
+    if (acompanamiento.calificacion_a_acompanante && acompanamiento.calificacion_a_usuaria && !acompanamiento.reporte_enviado) {
+      acompanamiento.reporte_enviado = true;
+      const superadmin = await Usuaria.findOne({ rol: 'superadmin' });
+      if (superadmin) {
+        await notificar(
+          superadmin._id,
+          'comentario',
+          'Nuevo reporte de acompanamiento',
+          `Acompanamiento completado entre ${acompanamiento.nombre_usuaria} y ${acompanamiento.nombre_acompanante}.`,
+          acompanamiento._id
+        );
+      }
+    }
+    await acompanamiento.save();
+    res.json({ mensaje: 'Calificacion guardada', acompanamiento });
+  } catch (err) {
+    res.status(500).json({ mensaje: 'Error', error: err.message });
+  }
+});
+
 router.put('/ubicacion/:id', authMiddleware, async (req, res) => {
   try {
     const { latitud, longitud, tipo } = req.body;
@@ -193,23 +233,30 @@ router.put('/ubicacion/:id', authMiddleware, async (req, res) => {
       ? { 'ubicacion_acompanante.latitud': latitud, 'ubicacion_acompanante.longitud': longitud }
       : { 'ubicacion_usuaria.latitud': latitud, 'ubicacion_usuaria.longitud': longitud };
     await Acompanamiento.findByIdAndUpdate(req.params.id, update);
-    res.json({ mensaje: 'Ubicación actualizada' });
+    res.json({ mensaje: 'Ubicacion actualizada' });
   } catch (err) {
-    res.status(500).json({ mensaje: 'Error' });
+    res.status(500).json({ mensaje: 'Error', error: err.message });
   }
 });
 
-// Cancelar
 router.put('/cancelar/:id', authMiddleware, async (req, res) => {
   try {
     await Acompanamiento.findByIdAndUpdate(req.params.id, { estado: 'cancelado' });
     res.json({ mensaje: 'Cancelado' });
   } catch (err) {
-    res.status(500).json({ mensaje: 'Error' });
+    res.status(500).json({ mensaje: 'Error', error: err.message });
   }
 });
 
-
-
+router.get('/:id', authMiddleware, async (req, res) => {
+  try {
+    const acompanamiento = await Acompanamiento.findById(req.params.id)
+      .populate('id_usuaria', 'nombre_completo foto_perfil ubicacion_actual')
+      .populate('id_acompanante', 'nombre_completo foto_perfil ubicacion_actual');
+    res.json(acompanamiento);
+  } catch (err) {
+    res.status(500).json({ mensaje: 'Error' });
+  }
+});
 
 module.exports = router;

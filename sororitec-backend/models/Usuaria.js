@@ -9,7 +9,11 @@ const usuariaSchema = new mongoose.Schema({
   cuatrimestre: { type: Number, default: null },
   foto_perfil: { type: String, default: null },
   bio: { type: String, default: '' },
-  rol: { type: String, enum: ['usuaria', 'administradora', 'acompanante'], default: 'usuaria' },
+  rol: { 
+  type: String, 
+  enum: ['usuaria', 'administradora', 'acompanante', 'abogada', 'psicologa', 'medica', 'superadmin'], 
+  default: 'usuaria' 
+},
   estado_cuenta: {
     type: String,
     enum: ['pendiente', 'activa', 'suspendida', 'baneada'],
